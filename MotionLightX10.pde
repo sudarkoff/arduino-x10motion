@@ -6,12 +6,30 @@
 #include <x10.h>
 #include <x10constants.h>
 
-#include "Sensor.h"
-#include "X10Lights.h"
+// CONFIG
+const int statusLed = 13;       // status LED
+const int PIRPin = 5;           // motion sensor
+const int photoResPin = 0;      // light sensor
 
-const int statusLed = 13;  // status LED
-MotionSensor motion;
-//X10Lights lights;          // X10 Motion/Light sensor instance
+const int zcPin = 9;            // X10 0-xing pin
+const int dataPin = 8;          // X10 data pin
+const int houseCode = HOUSE_G;  // X10 house code
+const int unitCode = UNIT_3;    // X10 unit code
+const int repeat = 2;           // X10 command repeat count
+
+const int delayBy = 180000;     // lights OFF delay
+const int lightThreshold = 150; // light brightness threshold
+
+// STATE
+#define NO_MOTION 0
+#define MOTION 1
+#define MOTION_NO_LIGHT 2
+
+// GLOBALS
+x10 house = x10(zcPin, dataPin);
+unsigned long lastMotionAt;
+boolean lightsOn_;
+
 
 void flashLed(int pin, int times, int wait) {
   for (int i = 0; i < times; i++) {
@@ -25,6 +43,69 @@ void flashLed(int pin, int times, int wait) {
   }
 }
 
+int readMotion()
+{
+  int motion = digitalRead(PIRPin);
+  if (motion == LOW) {
+    lastMotionAt = millis();
+  }
+  return (motion == LOW? HIGH: LOW);
+}
+
+unsigned long lastMotion()
+{
+  return lastMotionAt;
+}
+
+int readLight()
+{
+  return analogRead(photoResPin);
+}
+
+int state()
+{
+  int motion = readMotion();
+  Serial.print("Motion: "); Serial.println(motion);
+  int light = readLight();
+  Serial.print("Light: "); Serial.println(light);
+
+  if (motion == LOW)
+  {
+    unsigned long curTime = millis();
+    if ((millis() - lastMotion()) > delayBy)
+    {
+      return NO_MOTION;
+    }
+    else
+    {
+      return MOTION;
+    }
+  }
+  else if ((motion == HIGH) && (light > lightThreshold))
+  {
+    return MOTION;
+  }
+  else
+  {
+    return MOTION_NO_LIGHT;
+  }
+}
+
+void turnLights(boolean state)
+{
+  lightsOn_ = state;
+
+  // Send the ON/OFF command
+  house.write(houseCode, unitCode, repeat);
+  house.write(houseCode, (state == true)? ON: OFF, repeat);
+}
+
+boolean lightsState()
+{
+  return lightsOn_;
+}
+
+
 void setup()
 {
   Serial.begin(9600);
@@ -32,49 +113,31 @@ void setup()
   // Status LED
   pinMode(statusLed, OUTPUT);
 
-  // Initialize the sensors
-  int PIRPin = 5;
-  /*MotionSensor*/ motion = MotionSensor(PIRPin);
+  // Initialize motion sensor
+  pinMode(PIRPin, INPUT);
+  // wait for PIR to initialize
+  delay(5000);
   Serial.println("Motion sensor initialized.");
-/*
 
-  int photoResPin = 0;
-  LightSensor light = LightSensor(photoResPin);
+  // Initialize light sensor
+  pinMode(photoResPin, INPUT);
   Serial.println("Light sensor initialized.");
 
-  int zcPin = 9;
-  int dataPin = 8;
+  // Initialize X10 module
   pinMode(zcPin, INPUT);
   pinMode(dataPin, OUTPUT);
-  x10 house = x10(zcPin, dataPin);
+  house.write(houseCode, ALL_UNITS_OFF, repeat);
   Serial.println("X10 controller initialized.");
-
-  lights = X10Lights(
-    motion,   // motion sensor
-    light,    // light sensor
-    house,    // X10 controller
-    HOUSE_G,  // X10 house code
-    UNIT_3,   // X10 unit code
-    2,        // X10 command repeat count
-    300000    // lights OFF delay
-  );  
-*/
 }
 
 void loop()
 {
-  int state = motion.read();
-  if (state == HIGH) {
-    flashLed(statusLed, 1, 100);
-  }
-/*
-  state_t state = lights.state();
-  Serial.print("Controller state: "); Serial.println(state);
-  switch (state) {
+  switch (state()) {
     case NO_MOTION:
-      Serial.println("No motion - turning lights OFF.");
-      if (lights.lightsState()) {
-        lights.turnLights(false);
+      Serial.println("No motion.");
+      if (lightsState()) {
+        Serial.println("Turning lights OFF.");
+        turnLights(false);
       }
       break;
 
@@ -85,18 +148,19 @@ void loop()
 
     case MOTION_NO_LIGHT:
       flashLed(statusLed, 1, 100);
-      Serial.println("Motion detected and it's dark - turning lights ON.");
-      if (lights.lightsState()) {
-        lights.turnLights(true);
-      
+      Serial.println("Motion detected and it's dark.");
+      if (!lightsState()) {
+        Serial.println("Turning lights ON.");
+        turnLights(true);
+      }
       break;
 
     default:
+      flashLed(statusLed, 3, 50);
       Serial.println("How did we get here?!");
       break;
   }
 
-  delay(3000); // wait a second
-*/
+  delay(5000); // wait a bit
 }
 
